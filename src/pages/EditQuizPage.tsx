@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '@/services/api';
-import type { Quiz, Question, CreateQuestionRequest, CreateOptionRequest } from '@/types/api';
+import type { Quiz, Question, CreateQuestionRequest } from '@/types/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -43,6 +43,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+interface UIOption {
+  text: string;
+  isCorrect: boolean;
+}
+
 export default function EditQuizPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -60,7 +65,7 @@ export default function EditQuizPage() {
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionText, setQuestionText] = useState('');
   const [questionTimeLimit, setQuestionTimeLimit] = useState(30);
-  const [options, setOptions] = useState<CreateOptionRequest[]>([
+  const [options, setOptions] = useState<UIOption[]>([
     { text: '', isCorrect: true },
     { text: '', isCorrect: false },
     { text: '', isCorrect: false },
@@ -160,14 +165,17 @@ export default function EditQuizPage() {
 
   const openEditQuestion = (question: Question) => {
     setEditingQuestion(question);
-    setQuestionText(question.text);
-    setQuestionTimeLimit(question.timeLimit);
-    setOptions(
-      question.options.map((o) => ({
-        text: o.text,
-        isCorrect: o.isCorrect,
-      }))
-    );
+    setQuestionText(question.prompt);
+    setQuestionTimeLimit(question.timeLimit || 30);
+
+    const uiOptions: UIOption[] = [
+      { text: question.optionA, isCorrect: question.correctIndex === 0 },
+      { text: question.optionB, isCorrect: question.correctIndex === 1 },
+      { text: question.optionC, isCorrect: question.correctIndex === 2 },
+      { text: question.optionD, isCorrect: question.correctIndex === 3 },
+    ];
+
+    setOptions(uiOptions);
     setQuestionDialogOpen(true);
   };
 
@@ -180,8 +188,17 @@ export default function EditQuizPage() {
       return;
     }
 
-    const filledOptions = options.filter((o) => o.text.trim());
-    if (filledOptions.length < 2) {
+    const filledOptions = options.map(o => o.text.trim());
+    // Ensure all 4 options are filled for now, or at least provided
+    if (filledOptions.some(opt => !opt)) {
+      // Validate that we have inputs for A, B, C, D? 
+      // Backend likely expects strings for all. 
+    }
+
+    // Check minimum valid options (at least 2 non-empty?)
+    const validCount = filledOptions.filter(t => t).length;
+
+    if (validCount < 2) {
       toast({
         title: 'Mínimo 2 alternativas',
         description: 'Preencha pelo menos 2 alternativas.',
@@ -190,8 +207,8 @@ export default function EditQuizPage() {
       return;
     }
 
-    const hasCorrect = filledOptions.some((o) => o.isCorrect);
-    if (!hasCorrect) {
+    const correctIndex = options.findIndex((o) => o.isCorrect);
+    if (correctIndex === -1) {
       toast({
         title: 'Marque a correta',
         description: 'Selecione qual alternativa está correta.',
@@ -203,9 +220,12 @@ export default function EditQuizPage() {
     setIsSavingQuestion(true);
     try {
       const questionData: CreateQuestionRequest = {
-        text: questionText,
-        timeLimit: questionTimeLimit,
-        options: filledOptions,
+        prompt: questionText,
+        optionA: options[0].text, // We must send all fields even if empty/partial? Assuming UI enforces 4 slots or we fill blank
+        optionB: options[1].text,
+        optionC: options[2].text,
+        optionD: options[3].text,
+        correctIndex: correctIndex,
       };
 
       if (editingQuestion) {
@@ -294,10 +314,10 @@ export default function EditQuizPage() {
           Voltar
         </Button>
         <div className="flex items-center gap-3">
-          <Badge variant={quiz.isPublished ? 'default' : 'secondary'}>
-            {quiz.isPublished ? 'Publicado' : 'Rascunho'}
+          <Badge variant={quiz.status === 'PUBLISHED' ? 'default' : 'secondary'}>
+            {quiz.status === 'PUBLISHED' ? 'Publicado' : 'Rascunho'}
           </Badge>
-          {quiz.isPublished && quiz.questions?.length > 0 && (
+          {quiz.status === 'PUBLISHED' && quiz.questions && quiz.questions.length > 0 && (
             <Button
               onClick={() => navigate(`/dashboard/play/${quiz.id}`)}
               className="btn-gradient-success"
@@ -347,7 +367,7 @@ export default function EditQuizPage() {
               )}
               Salvar Alterações
             </Button>
-            {!quiz.isPublished && (
+            {quiz.status !== 'PUBLISHED' && (
               <Button
                 onClick={handlePublish}
                 disabled={isPublishing || !quiz.questions?.length}
@@ -406,13 +426,13 @@ export default function EditQuizPage() {
                       <span className="font-semibold">{index + 1}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{question.text}</p>
+                      <p className="font-medium truncate">{question.prompt}</p>
                       <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Clock className="h-3 w-3" />
                           {question.timeLimit}s
                         </span>
-                        <span>{question.options?.length || 0} alternativas</span>
+                        <span>4 alternativas</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">

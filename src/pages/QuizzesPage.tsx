@@ -218,7 +218,7 @@ interface QuizCardProps {
 
 function QuizCard({ quiz, onStart, onEdit, onDelete, onClick }: QuizCardProps) {
   const questionCount = quiz.questions?.length || 0;
-  const canStart = quiz.isPublished && questionCount > 0;
+  const canStart = quiz.status === 'PUBLISHED' && questionCount > 0;
 
   return (
     <Card className="hover:shadow-lg transition-all duration-300 cursor-pointer group" onClick={onClick}>
@@ -269,8 +269,8 @@ function QuizCard({ quiz, onStart, onEdit, onDelete, onClick }: QuizCardProps) {
               {new Date(quiz.createdAt).toLocaleDateString('pt-BR')}
             </span>
           </div>
-          <Badge variant={quiz.isPublished ? 'default' : 'secondary'}>
-            {quiz.isPublished ? 'Publicado' : 'Rascunho'}
+          <Badge variant={quiz.status === 'PUBLISHED' ? 'default' : 'secondary'}>
+            {quiz.status === 'PUBLISHED' ? 'Publicado' : 'Rascunho'}
           </Badge>
         </div>
         {canStart && (

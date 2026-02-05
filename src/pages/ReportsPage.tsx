@@ -113,15 +113,15 @@ export default function ReportsPage() {
                             <BarChart3 className="h-6 w-6 text-primary" />
                           </div>
                           <div>
-                            <h3 className="font-semibold">{room.quizTitle}</h3>
+                            <h3 className="font-semibold">{room.quizTitleSnapshot}</h3>
                             <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
                               <span className="flex items-center gap-1">
-                                <Users className="h-4 w-4" />
-                                {room.playerCount} participantes
+                                <FileQuestion className="h-4 w-4" />
+                                {room.totalQuestions} perguntas
                               </span>
                               <span className="flex items-center gap-1">
                                 <Clock className="h-4 w-4" />
-                                {new Date(room.createdAt).toLocaleDateString('pt-BR')}
+                                {new Date(room.finishedAt).toLocaleDateString('pt-BR')}
                               </span>
                             </div>
                           </div>

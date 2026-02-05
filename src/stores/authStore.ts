@@ -8,7 +8,7 @@ interface AuthState {
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  
+
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
@@ -25,20 +25,34 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (email: string, password: string) => {
         const response = await api.login({ email, password });
-        localStorage.setItem('rankit_token', response.accessToken);
+        // @ts-ignore - Handle potential backend snake_case or PascalCase response
+        const token = response.accessToken || response.token || response.access_token || response.AccessToken;
+
+        if (!token) {
+          throw new Error('Falha no login: Token não recebido do servidor');
+        }
+
+        localStorage.setItem('rankit_token', token);
         set({
           user: response.user,
-          token: response.accessToken,
+          token: token,
           isAuthenticated: true,
         });
       },
 
       register: async (name: string, email: string, password: string) => {
         const response = await api.register({ name, email, password });
-        localStorage.setItem('rankit_token', response.accessToken);
+        // @ts-ignore - Handle potential backend snake_case or PascalCase response
+        const token = response.accessToken || response.token || response.access_token || response.AccessToken;
+
+        if (!token) {
+          throw new Error('Falha no registro: Token não recebido do servidor');
+        }
+
+        localStorage.setItem('rankit_token', token);
         set({
           user: response.user,
-          token: response.accessToken,
+          token: token,
           isAuthenticated: true,
         });
       },

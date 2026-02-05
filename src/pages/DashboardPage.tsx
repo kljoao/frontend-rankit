@@ -26,13 +26,15 @@ export default function DashboardPage() {
     const fetchData = async () => {
       try {
         const [quizzesData, roomsData] = await Promise.all([
-          api.getQuizzes(),
-          api.getRoomReports().catch(() => []),
+          api.getQuizzes().catch(() => []) as Promise<Quiz[]>,
+          api.getRoomReports().catch(() => []) as Promise<RoomReport[]>,
         ]);
-        setQuizzes(quizzesData);
-        setRecentRooms(roomsData.slice(0, 5));
+        setQuizzes(Array.isArray(quizzesData) ? quizzesData : []);
+        setRecentRooms(Array.isArray(roomsData) ? roomsData.slice(0, 5) : []);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
+        setQuizzes([]);
+        setRecentRooms([]);
       } finally {
         setIsLoading(false);
       }
@@ -44,14 +46,14 @@ export default function DashboardPage() {
   const stats = [
     {
       title: 'Total de Quizzes',
-      value: quizzes.length,
+      value: quizzes?.length || 0,
       icon: FileQuestion,
       color: 'text-primary',
       bgColor: 'bg-primary/10',
     },
     {
       title: 'Quizzes Publicados',
-      value: quizzes.filter((q) => q.isPublished).length,
+      value: (quizzes || []).filter((q) => q.status === 'PUBLISHED').length,
       icon: Play,
       color: 'text-accent',
       bgColor: 'bg-accent/10',
@@ -168,7 +170,7 @@ export default function DashboardPage() {
                     className="flex items-center justify-between p-4 rounded-xl bg-muted/50 hover:bg-muted transition-colors"
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${quiz.isPublished ? 'bg-accent' : 'bg-warning'}`} />
+                      <div className={`w-2 h-2 rounded-full ${quiz.status === 'PUBLISHED' ? 'bg-accent' : 'bg-warning'}`} />
                       <div>
                         <p className="font-medium">{quiz.title}</p>
                         <p className="text-sm text-muted-foreground">

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoomStore, useWebSocket } from '@/stores/roomStore';
+import { api } from '@/services/api';
+import { useToast } from '@/hooks/use-toast';
 import { RankItLogo } from '@/components/RankItLogo';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -23,34 +25,106 @@ import { cn } from '@/lib/utils';
 export default function ProjectorPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const { connect, disconnect } = useWebSocket();
-  const {
-    room,
-    currentQuestion,
-    questionIndex,
-    totalQuestions,
-    leaderboard,
-    answerDistribution,
-    correctOptionId,
-    isConnected,
-    openQuestion,
-    revealAnswer,
-    nextQuestion,
-    endGame,
-  } = useRoomStore();
+
+  // IMPORTANT: Use reactive subscriptions for real-time updates
+  const room = useRoomStore((state) => state.room);
+  const currentQuestion = useRoomStore((state) => state.currentQuestion);
+  const questionIndex = useRoomStore((state) => state.questionIndex);
+  const totalQuestions = useRoomStore((state) => state.totalQuestions);
+  const leaderboard = useRoomStore((state) => state.leaderboard);
+  const answerDistribution = useRoomStore((state) => state.answerDistribution);
+  const correctOptionIndex = useRoomStore((state) => state.correctOptionIndex);
+  const isConnected = useRoomStore((state) => state.isConnected);
+  const pendingPlayers = useRoomStore((state) => state.pendingPlayers);
+
+  const openQuestion = useRoomStore((state) => state.openQuestion);
+  const revealAnswer = useRoomStore((state) => state.revealAnswer);
+  const nextQuestion = useRoomStore((state) => state.nextQuestion);
+  const endGame = useRoomStore((state) => state.endGame);
+  const setRoom = useRoomStore((state) => state.setRoom);
+  const moderateEntry = useRoomStore((state) => state.moderateEntry);
+  const kickPlayer = useRoomStore((state) => state.kickPlayer);
 
   const [timeLeft, setTimeLeft] = useState(0);
   const [answersCount, setAnswersCount] = useState(0);
 
+  // Prioritize "status" (which is updated by WebSocket events) over "Status" (initial API snapshot)
+  const currentStatus = room?.status || room?.Status;
+
+  // Debug logs to track state
+  console.log('ProjectorPage Render:', {
+    isConnected,
+    hasRoom: !!room,
+    currentStatus,
+    hasCurrentQuestion: !!currentQuestion,
+    questionIndex,
+    totalQuestions,
+    playersCount: room?.players?.length || 0,
+    pendingCount: pendingPlayers.length,
+    leaderboardCount: leaderboard.length
+  });
+
   useEffect(() => {
-    if (roomId) {
-      connect(roomId, 'teacher');
-    }
+    const initRoom = async () => {
+      if (!roomId) return;
+
+      try {
+        // Resolve Room ID (UUID) from the API (url param might be a short code)
+        let targetId = roomId;
+
+        try {
+          // Fetch room details via HTTP first
+          const roomData = await api.getRoomByCode(roomId);
+          if (roomData) {
+            const resolvedId = roomData.id || roomData.ID;
+
+            if (resolvedId) {
+              targetId = resolvedId;
+            }
+
+            console.log('📍 Room resolved via API:', {
+              roomId: resolvedId,
+              teacherId: roomData.teacherId || (roomData as any).TeacherID,
+              quizId: roomData.quizId || (roomData as any).QuizID,
+              status: roomData.status || (roomData as any).Status,
+              playersCount: roomData.players?.length || 0
+            });
+
+            // Normalize backend fields
+            const normalizedRoom = {
+              ...roomData,
+              id: resolvedId,
+              teacherId: roomData.teacherId || (roomData as any).TeacherID || (roomData as any).teacherID,
+              quizId: roomData.quizId || (roomData as any).QuizID || (roomData as any).quiz_id,
+              status: roomData.status || (roomData as any).Status,
+              players: roomData.players || [],
+            };
+
+            console.log('✅ Normalized room data:', normalizedRoom);
+
+            // Hydrate the store immediately with normalized data
+            setRoom(normalizedRoom);
+          }
+        } catch (e: any) {
+          console.error('❌ Error fetching room details via HTTP:', e.message);
+          console.error('Full error:', e);
+        }
+
+        console.log('🔌 Attempting WebSocket connection to room:', targetId);
+        connect(targetId, 'teacher');
+      } catch (error) {
+        console.error('❌ Failed to initialize room:', error);
+      }
+    };
+
+    initRoom();
+
     return () => disconnect();
   }, [roomId]);
 
   useEffect(() => {
-    if (room?.status === 'OPEN' && currentQuestion) {
-      setTimeLeft(currentQuestion.timeLimit);
+    if (currentStatus === 'OPEN' && currentQuestion) {
+      setTimeLeft(currentQuestion.timeLimit || 30);
       const timer = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
@@ -62,7 +136,7 @@ export default function ProjectorPage() {
       }, 1000);
       return () => clearInterval(timer);
     }
-  }, [room?.status, currentQuestion?.id]);
+  }, [currentStatus, currentQuestion?.id]);
 
   useEffect(() => {
     const total = Object.values(answerDistribution).reduce((a, b) => a + b, 0);
@@ -70,7 +144,7 @@ export default function ProjectorPage() {
   }, [answerDistribution]);
 
   const players = room?.players || [];
-  const roomUrl = room ? `${window.location.origin}/room/${room.code}` : '';
+  const roomUrl = room ? `${window.location.origin}/room/${room.id}` : '';
 
   const optionColors = [
     'bg-option-a',
@@ -81,19 +155,19 @@ export default function ProjectorPage() {
 
   const optionLabels = ['A', 'B', 'C', 'D'];
 
-  if (!isConnected || !room) {
+  if (!room) {
     return (
       <div className="min-h-screen bg-gradient-primary flex items-center justify-center">
         <div className="text-white text-center">
           <div className="animate-spin w-16 h-16 border-4 border-white border-t-transparent rounded-full mx-auto mb-4" />
-          <p className="text-xl">Conectando à sala...</p>
+          <p className="text-xl">Carregando dados da sala...</p>
         </div>
       </div>
     );
   }
 
   // LOBBY State
-  if (room.status === 'LOBBY') {
+  if (currentStatus === 'LOBBY') {
     return (
       <div className="min-h-screen bg-gradient-hero text-white p-8">
         <div className="max-w-6xl mx-auto">
@@ -103,7 +177,7 @@ export default function ProjectorPage() {
             <div className="text-right">
               <p className="text-white/70">Código da sala</p>
               <p className="text-4xl font-heading font-bold tracking-widest">
-                {room.code}
+                {room.id}
               </p>
             </div>
           </div>
@@ -143,20 +217,65 @@ export default function ProjectorPage() {
                     {players.map((player, index) => (
                       <div
                         key={player.id}
-                        className="bg-white/20 rounded-xl p-3 flex items-center gap-3 animate-scale-in"
+                        className="group relative bg-white/20 rounded-xl p-3 flex items-center justify-between gap-3 animate-scale-in"
                         style={{ animationDelay: `${index * 50}ms` }}
                       >
-                        <div className="w-10 h-10 rounded-full bg-gradient-primary flex items-center justify-center font-bold">
-                          {player.nickname.charAt(0).toUpperCase()}
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <div className="w-10 h-10 rounded-full bg-gradient-primary flex items-center justify-center font-bold flex-shrink-0">
+                            {player.nickname.charAt(0).toUpperCase()}
+                          </div>
+                          <span className="font-medium truncate">
+                            {player.nickname}
+                          </span>
                         </div>
-                        <span className="font-medium truncate">
-                          {player.nickname}
-                        </span>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => kickPlayer(player.id!)}
+                          className="h-8 w-8 text-white/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all rounded-full flex-shrink-0"
+                          title="Remover aluno"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
+
+              {/* Pending Requests */}
+              {pendingPlayers.length > 0 && (
+                <div className="mt-8">
+                  <div className="flex items-center gap-3 mb-4 text-warning">
+                    <Clock className="h-6 w-6" />
+                    <h3 className="text-xl font-heading font-bold">Solicitações Pendentes ({pendingPlayers.length})</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {pendingPlayers.map((pending) => (
+                      <div key={(pending as any).connectionId} className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-4 flex items-center justify-between animate-in fade-in slide-in-from-right-4">
+                        <span className="font-bold text-lg">{pending.nickname}</span>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => moderateEntry((pending as any).connectionId, 'ACCEPT')}
+                            className="bg-accent hover:bg-accent/90"
+                          >
+                            <Check className="h-4 w-4 mr-1" /> Aceitar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => moderateEntry((pending as any).connectionId, 'REJECT')}
+                          >
+                            <X className="h-4 w-4 mr-1" /> Negar
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {players.length > 0 && (
                 <Button
@@ -176,7 +295,14 @@ export default function ProjectorPage() {
   }
 
   // OPEN State - Question displayed
-  if (room.status === 'OPEN' && currentQuestion) {
+  if (currentStatus === 'OPEN' && currentQuestion) {
+    const options = [
+      currentQuestion.optionA,
+      currentQuestion.optionB,
+      currentQuestion.optionC,
+      currentQuestion.optionD,
+    ];
+
     return (
       <div className="min-h-screen bg-background p-8">
         <div className="max-w-6xl mx-auto">
@@ -203,23 +329,23 @@ export default function ProjectorPage() {
           </div>
 
           {/* Progress */}
-          <Progress 
-            value={(answersCount / players.length) * 100} 
+          <Progress
+            value={players.length > 0 ? (answersCount / players.length) * 100 : 0}
             className="h-3 mb-8"
           />
 
           {/* Question */}
           <div className="bg-card rounded-3xl p-8 shadow-lg mb-8">
             <h1 className="text-4xl font-heading font-bold text-center">
-              {currentQuestion.text}
+              {currentQuestion.prompt}
             </h1>
           </div>
 
           {/* Options Grid */}
           <div className="grid md:grid-cols-2 gap-4">
-            {currentQuestion.options?.map((option, index) => (
+            {options.map((text, index) => (
               <div
-                key={option.id}
+                key={index}
                 className={cn(
                   'game-option text-xl',
                   index === 0 && 'game-option-a',
@@ -231,7 +357,7 @@ export default function ProjectorPage() {
                 <div className="w-14 h-14 rounded-xl bg-white/20 flex items-center justify-center text-2xl font-bold">
                   {optionLabels[index]}
                 </div>
-                <span className="flex-1">{option.text}</span>
+                <span className="flex-1">{text}</span>
               </div>
             ))}
           </div>
@@ -253,8 +379,14 @@ export default function ProjectorPage() {
   }
 
   // REVEALED State
-  if (room.status === 'REVEALED' && currentQuestion) {
-    const correctOption = currentQuestion.options?.find(o => o.id === correctOptionId);
+  if (currentStatus === 'REVEALED' && currentQuestion) {
+    const options = [
+      currentQuestion.optionA,
+      currentQuestion.optionB,
+      currentQuestion.optionC,
+      currentQuestion.optionD,
+    ];
+    const correctOptionText = correctOptionIndex !== null ? options[correctOptionIndex] : '';
     const totalResponses = Object.values(answerDistribution).reduce((a, b) => a + b, 0);
 
     return (
@@ -268,21 +400,21 @@ export default function ProjectorPage() {
             <div className="flex items-center gap-2">
               <Check className="h-6 w-6 text-accent" />
               <span className="text-xl font-semibold">
-                Resposta correta: {correctOption?.text}
+                Resposta correta: {correctOptionText}
               </span>
             </div>
           </div>
 
           {/* Options with Results */}
           <div className="grid md:grid-cols-2 gap-4 mb-8">
-            {currentQuestion.options?.map((option, index) => {
-              const count = answerDistribution[option.id] || 0;
+            {options.map((text, index) => {
+              const count = answerDistribution[index.toString()] || 0;
               const percentage = totalResponses > 0 ? (count / totalResponses) * 100 : 0;
-              const isCorrect = option.id === correctOptionId;
+              const isCorrect = index === correctOptionIndex;
 
               return (
                 <div
-                  key={option.id}
+                  key={index}
                   className={cn(
                     'relative overflow-hidden rounded-xl p-6 transition-all',
                     isCorrect
@@ -310,7 +442,7 @@ export default function ProjectorPage() {
                         'font-medium text-lg',
                         isCorrect ? 'text-white' : 'text-foreground'
                       )}>
-                        {option.text}
+                        {text}
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -387,7 +519,7 @@ export default function ProjectorPage() {
   }
 
   // FINISHED State
-  if (room.status === 'FINISHED') {
+  if (currentStatus === 'FINISHED') {
     return (
       <div className="min-h-screen bg-gradient-hero text-white p-8">
         <div className="max-w-4xl mx-auto text-center">
@@ -434,5 +566,30 @@ export default function ProjectorPage() {
     );
   }
 
-  return null;
+  // Fallback: Unknown state or waiting for sync
+  // If we have room data but no recognized status, assume LOBBY
+  if (room && !currentStatus) {
+    console.warn('⚠️ Room exists but status is undefined, defaulting to LOBBY');
+    // Update room status in store
+    const updatedRoom = { ...room, status: 'LOBBY' as RoomStatus };
+    setRoom(updatedRoom);
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-primary flex items-center justify-center p-8">
+      <div className="text-white text-center max-w-2xl">
+        <div className="animate-spin w-16 h-16 border-4 border-white border-t-transparent rounded-full mx-auto mb-4" />
+        <h1 className="text-3xl font-heading font-bold mb-4">Sincronizando...</h1>
+        <p className="text-lg text-white/80 mb-6">
+          Aguardando atualização do estado da sala
+        </p>
+        <div className="bg-white/10 rounded-xl p-6 text-left text-sm font-mono">
+          <div>Status: {currentStatus || 'indefinido'}</div>
+          <div>Conectado: {isConnected ? 'Sim' : 'Não'}</div>
+          <div>Pergunta atual: {currentQuestion ? 'Sim' : 'Não'}</div>
+          <div>Jogadores: {room?.players?.length || 0}</div>
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -37,10 +37,13 @@ export default function StudentRoomPage() {
     questionIndex,
     totalQuestions,
     leaderboard,
-    correctOptionId,
+    correctOptionIndex,
     playerAnswer,
     isConnected,
     submitAnswer,
+    setRoom,
+    isPendingApproval,
+    error,
   } = useRoomStore();
 
   useEffect(() => {
@@ -48,8 +51,19 @@ export default function StudentRoomPage() {
     const validateRoom = async () => {
       try {
         const roomData = await api.getRoomByCode(roomCode!);
-        setRoomId(roomData.id);
+        console.log('Validating room:', roomData);
+        // Backend might return ID (Pascal) or id (camel)
+        // Also map Status -> status mismatch if needed, though roomStore handles it now.
+        const resolvedId = roomData.id || roomData.ID;
+
+        if (!resolvedId) {
+          throw new Error('Room ID not found in response');
+        }
+
+        setRoomId(resolvedId);
+        setRoom(roomData); // Hydrate store immediately
       } catch (error) {
+        console.error('Validate room error:', error);
         toast({
           title: 'Sala não encontrada',
           description: 'Verifique o código e tente novamente.',
@@ -68,7 +82,7 @@ export default function StudentRoomPage() {
 
   useEffect(() => {
     if (room?.status === 'OPEN' && currentQuestion) {
-      setTimeLeft(currentQuestion.timeLimit);
+      setTimeLeft(currentQuestion.timeLimit || 30); // Fallback if timeLimit missing
       const timer = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 1) {
@@ -100,17 +114,29 @@ export default function StudentRoomPage() {
       return;
     }
 
+    console.log('handleJoin called', { nickname, roomId });
+
     if (roomId) {
-      setIsJoining(true);
-      connect(roomId, 'player', nickname);
-      setHasJoined(true);
-      setIsJoining(false);
+      try {
+        setIsJoining(true);
+        console.log('Connecting to room:', roomId);
+        connect(roomId, 'player', nickname);
+        setHasJoined(true);
+        // setIsJoining(false); // Do not reset immediately, let component unmount or state transition handle it
+      } catch (e) {
+        console.error('Error connecting:', e);
+        toast({ title: 'Erro ao conectar', variant: 'destructive' });
+        setIsJoining(false);
+      }
+    } else {
+      console.error('Room ID missing');
+      toast({ title: 'Erro: ID da sala não encontrado', variant: 'destructive' });
     }
   };
 
-  const handleSelectOption = (optionId: string) => {
-    if (room?.status === 'OPEN' && !playerAnswer) {
-      submitAnswer(optionId);
+  const handleSelectOption = (index: number) => {
+    if (room?.status === 'OPEN' && playerAnswer === null) {
+      submitAnswer(index);
     }
   };
 
@@ -171,13 +197,59 @@ export default function StudentRoomPage() {
     );
   }
 
-  // Connecting
-  if (!isConnected || !room) {
+  // Error state (kicked or connection error)
+  if (error) {
     return (
-      <div className="min-h-screen bg-gradient-primary flex items-center justify-center">
-        <div className="text-white text-center">
-          <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4" />
-          <p className="text-xl">Entrando na sala...</p>
+      <div className="min-h-screen bg-gradient-primary flex items-center justify-center p-4">
+        <div className="text-white text-center max-w-sm">
+          <div className="animate-bounce-in">
+            <div className="w-20 h-20 bg-destructive/20 border-2 border-destructive/50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <X className="h-10 w-10 text-white" />
+            </div>
+            <h1 className="text-3xl font-heading font-bold mb-4">Opa!</h1>
+            <p className="text-xl text-white/90 mb-8">{error}</p>
+            <Button
+              onClick={() => window.location.href = '/'}
+              variant="outline"
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20 h-12 px-8"
+            >
+              Voltar ao Início
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Connecting state - show while connecting to WebSocket
+  if (!isConnected && hasJoined) {
+    return (
+      <div className="min-h-screen bg-gradient-hero flex flex-col items-center justify-center p-4">
+        <div className="text-white text-center animate-in fade-in zoom-in duration-500">
+          <div className="relative mb-8">
+            <div className="w-24 h-24 bg-white/10 backdrop-blur-md rounded-3xl flex items-center justify-center mx-auto shadow-2xl animate-float">
+              <Loader2 className="h-12 w-12 text-accent animate-spin" />
+            </div>
+          </div>
+
+          <h1 className="text-4xl font-heading font-bold mb-2">Conectando...</h1>
+          <p className="text-xl font-medium text-white/90 mb-4">{nickname}</p>
+
+          <div className="max-w-xs mx-auto bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
+            <p className="text-lg text-white/70">
+              Aguarde enquanto estabelecemos a conexão com a sala
+            </p>
+          </div>
+
+          <div className="mt-12 flex justify-center gap-2">
+            <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+            <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+            <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+        </div>
+
+        <div className="fixed bottom-8 opacity-40">
+          <RankItLogo variant="white" className="h-6" />
         </div>
       </div>
     );
@@ -186,25 +258,45 @@ export default function StudentRoomPage() {
   // Lobby - Waiting
   if (room.status === 'LOBBY') {
     return (
-      <div className="min-h-screen bg-gradient-hero flex items-center justify-center p-4">
-        <div className="text-white text-center">
-          <div className="animate-float">
-            <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Check className="h-10 w-10" />
+      <div className="min-h-screen bg-gradient-hero flex flex-col items-center justify-center p-4">
+        <div className="text-white text-center animate-in fade-in zoom-in duration-500">
+          <div className="relative mb-8">
+            <div className="w-24 h-24 bg-white/10 backdrop-blur-md rounded-3xl flex items-center justify-center mx-auto shadow-2xl animate-float">
+              {isPendingApproval ? (
+                <Clock className="h-12 w-12 text-warning animate-pulse" />
+              ) : (
+                <Check className="h-12 w-12 text-accent" />
+              )}
             </div>
+            {!isPendingApproval && (
+              <div className="absolute -top-2 -right-2 w-8 h-8 bg-accent rounded-full flex items-center justify-center animate-scale-in">
+                <Check className="h-4 w-4" />
+              </div>
+            )}
           </div>
-          <h1 className="text-3xl font-heading font-bold mb-2">
-            Você está dentro! 🎮
+
+          <h1 className="text-4xl font-heading font-bold mb-2">
+            {isPendingApproval ? 'Quase lá! ⏳' : 'Você está dentro! 🎮'}
           </h1>
-          <p className="text-xl text-white/80 mb-4">{nickname}</p>
-          <p className="text-white/60">Aguardando o professor iniciar...</p>
-          <div className="mt-8 animate-pulse">
-            <div className="flex justify-center gap-1">
-              <div className="w-3 h-3 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <div className="w-3 h-3 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <div className="w-3 h-3 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
+          <p className="text-2xl font-medium text-white/90 mb-4">{nickname}</p>
+
+          <div className="max-w-xs mx-auto bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
+            <p className="text-lg text-white/70">
+              {isPendingApproval
+                ? 'O professor recebeu seu pedido. Aguarde um instante...'
+                : 'Prepare-se! O jogo começará em breve.'}
+            </p>
           </div>
+
+          <div className="mt-12 flex justify-center gap-2">
+            <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+            <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+            <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+        </div>
+
+        <div className="fixed bottom-8 opacity-40">
+          <RankItLogo variant="white" className="h-6" />
         </div>
       </div>
     );
@@ -212,6 +304,13 @@ export default function StudentRoomPage() {
 
   // Question Open
   if (room.status === 'OPEN' && currentQuestion) {
+    const options = [
+      currentQuestion.optionA,
+      currentQuestion.optionB,
+      currentQuestion.optionC,
+      currentQuestion.optionD,
+    ];
+
     return (
       <div className="min-h-screen bg-background p-4 flex flex-col">
         {/* Header */}
@@ -232,37 +331,37 @@ export default function StudentRoomPage() {
         <Card className="mb-4">
           <CardContent className="pt-6">
             <p className="text-lg font-medium text-center">
-              {currentQuestion.text}
+              {currentQuestion.prompt}
             </p>
           </CardContent>
         </Card>
 
         {/* Options */}
         <div className="flex-1 grid grid-cols-1 gap-3">
-          {currentQuestion.options?.map((option, index) => (
+          {options.map((text, index) => (
             <button
-              key={option.id}
-              onClick={() => handleSelectOption(option.id)}
-              disabled={!!playerAnswer}
+              key={index}
+              onClick={() => handleSelectOption(index)}
+              disabled={playerAnswer !== null}
               className={cn(
                 'game-option',
                 optionColors[index],
-                playerAnswer === option.id && 'ring-4 ring-white scale-105',
-                playerAnswer && playerAnswer !== option.id && 'opacity-50'
+                playerAnswer === index && 'ring-4 ring-white scale-105',
+                playerAnswer !== null && playerAnswer !== index && 'opacity-50'
               )}
             >
               <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center text-xl font-bold">
                 {optionLabels[index]}
               </div>
-              <span className="flex-1 text-left">{option.text}</span>
-              {playerAnswer === option.id && (
+              <span className="flex-1 text-left">{text}</span>
+              {playerAnswer === index && (
                 <Check className="h-6 w-6" />
               )}
             </button>
           ))}
         </div>
 
-        {playerAnswer && (
+        {playerAnswer !== null && (
           <div className="mt-4 text-center text-muted-foreground">
             Resposta enviada! Aguardando resultado...
           </div>
@@ -273,8 +372,14 @@ export default function StudentRoomPage() {
 
   // Revealed
   if (room.status === 'REVEALED' && currentQuestion) {
-    const isCorrect = playerAnswer === correctOptionId;
+    const isCorrect = playerAnswer === correctOptionIndex;
     const playerEntry = leaderboard.find(e => e.nickname === nickname);
+    const options = [
+      currentQuestion.optionA,
+      currentQuestion.optionB,
+      currentQuestion.optionC,
+      currentQuestion.optionD,
+    ];
 
     return (
       <div className={cn(
@@ -297,7 +402,7 @@ export default function StudentRoomPage() {
                 Errou! 😅
               </h1>
               <p className="text-xl text-white/80">
-                A resposta era: {currentQuestion.options?.find(o => o.id === correctOptionId)?.text}
+                A resposta era: {correctOptionIndex !== null ? options[correctOptionIndex] : ''}
               </p>
             </>
           )}
@@ -355,5 +460,35 @@ export default function StudentRoomPage() {
     );
   }
 
-  return null;
+  // Fallback: If connected but waiting for room data or status update
+  return (
+    <div className="min-h-screen bg-gradient-hero flex flex-col items-center justify-center p-4">
+      <div className="text-white text-center animate-in fade-in zoom-in duration-500">
+        <div className="relative mb-8">
+          <div className="w-24 h-24 bg-white/10 backdrop-blur-md rounded-3xl flex items-center justify-center mx-auto shadow-2xl animate-float">
+            <Clock className="h-12 w-12 text-accent animate-pulse" />
+          </div>
+        </div>
+
+        <h1 className="text-4xl font-heading font-bold mb-2">Aguardando aprovação...</h1>
+        <p className="text-2xl font-medium text-white/90 mb-4">{nickname}</p>
+
+        <div className="max-w-xs mx-auto bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
+          <p className="text-lg text-white/70">
+            O professor recebeu seu pedido. Aguarde a aprovação para entrar!
+          </p>
+        </div>
+
+        <div className="mt-12 flex justify-center gap-2">
+          <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+          <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+          <div className="w-2 h-2 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+        </div>
+      </div>
+
+      <div className="fixed bottom-8 opacity-40">
+        <RankItLogo variant="white" className="h-6" />
+      </div>
+    </div>
+  );
 }

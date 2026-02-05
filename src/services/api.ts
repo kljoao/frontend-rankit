@@ -39,9 +39,20 @@ class ApiService {
       return config;
     });
 
-    // Handle auth errors
+    // Handle auth errors and text/plain JSON responses
     this.client.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        // Handle potential text/plain response that contains JSON
+        if (typeof response.data === 'string') {
+          try {
+            const parsed = JSON.parse(response.data);
+            response.data = parsed;
+          } catch (e) {
+            // Not JSON, leave as is
+          }
+        }
+        return response;
+      },
       (error: AxiosError) => {
         if (error.response?.status === 401) {
           localStorage.removeItem('rankit_token');
@@ -86,7 +97,7 @@ class ApiService {
   }
 
   async updateQuiz(id: string, data: UpdateQuizRequest): Promise<Quiz> {
-    const response = await this.client.patch<Quiz>(`/quizzes/${id}`, data);
+    const response = await this.client.put<Quiz>(`/quizzes/${id}`, data);
     return response.data;
   }
 
@@ -95,7 +106,7 @@ class ApiService {
   }
 
   async publishQuiz(id: string): Promise<Quiz> {
-    const response = await this.client.patch<Quiz>(`/quizzes/${id}`, { isPublished: true });
+    const response = await this.client.post<Quiz>(`/quizzes/${id}/publish`);
     return response.data;
   }
 
@@ -106,7 +117,7 @@ class ApiService {
   }
 
   async updateQuestion(quizId: string, questionId: string, data: Partial<CreateQuestionRequest>): Promise<Question> {
-    const response = await this.client.patch<Question>(`/quizzes/${quizId}/questions/${questionId}`, data);
+    const response = await this.client.put<Question>(`/quizzes/${quizId}/questions/${questionId}`, data);
     return response.data;
   }
 
@@ -115,7 +126,7 @@ class ApiService {
   }
 
   async reorderQuestions(quizId: string, questionIds: string[]): Promise<void> {
-    await this.client.put(`/quizzes/${quizId}/questions/reorder`, { questionIds });
+    await this.client.post(`/quizzes/${quizId}/questions/reorder`, { order: questionIds });
   }
 
   // Rooms
@@ -130,7 +141,7 @@ class ApiService {
   }
 
   async getRoomByCode(code: string): Promise<Room> {
-    const response = await this.client.get<Room>(`/rooms/code/${code}`);
+    const response = await this.client.get<Room>(`/rooms/${code}`);
     return response.data;
   }
 
@@ -146,12 +157,21 @@ class ApiService {
   }
 
   async getQuizReports(): Promise<Quiz[]> {
+    // Note: The user list didn't explicitly show a GET /reports/quizzes endpoint for listing, 
+    // but showed GET /reports/quizzes/{id}. 
+    // The user list was: 
+    // GET /reports/rooms
+    // GET /reports/rooms/{id}
+    // GET /reports/quizzes/{id}
+    // usage of getQuizReports (plural) seems unrelated to the specific requested changes but I'll leave it 
+    // if it wasn't explicitly forbidden, to avoid breaking existing unseen code.
+    // However, I MUST fix getQuizSummary which maps to GET /reports/quizzes/{id}
     const response = await this.client.get<Quiz[]>('/reports/quizzes');
     return response.data;
   }
 
   async getQuizSummary(id: string): Promise<QuizSummary> {
-    const response = await this.client.get<QuizSummary>(`/reports/quizzes/${id}/summary`);
+    const response = await this.client.get<QuizSummary>(`/reports/quizzes/${id}`);
     return response.data;
   }
 }
